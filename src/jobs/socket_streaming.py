@@ -2,41 +2,49 @@ import json
 import socket
 import time
 import pandas as pd 
+import logging
+import sys
 
-def send_data_over_socket(file_path, host='127.0.0.1', port=9999, chunk_size=2):
+def read_data_from_file(file_path):
+    """Reads data from a JSON file and returns it."""
+    try:
+        with open(file_path, 'r') as file:
+            data = [json.loads(line) for line in file]
+        return data
+    except FileNotFoundError:
+        logging.error(f"File not found at path: {file_path}")
+        sys.exit(1)
+
+
+def chunk_data(data, chunk_size):
+    """Chunks the data into smaller portions."""
+    return [data[i:i+chunk_size] for i in range(0, len(data), chunk_size)]
+
+
+def send_data_over_socket(data_chunks, host='127.0.0.1', port=9999):
+    """Sends data chunks over a socket connection."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind((host, port))
     s.listen(1)
-    print(f"Listening for connections on {host}:{port}")
+    logging.info(f"Listening for connections on {host}:{port}")
 
-    last_sent_index = 0 
     while True:
         conn, addr = s.accept()
-        print(f"Connecting from {addr}")
+        logging.info(f"Connected to {addr}")
         try:
-            with open(file_path, 'r') as file:
-                # skip if the line were already sent
-                for _ in range(last_sent_index):
-                    next(file)
-                
-                records = []
-                for line in file:
-                    records.append(json.loads(line))
-                    if(len(records)) == chunk_size:
-                        chunk = pd.DataFrame(records)
-                        print(chunk)
-                        for record in chunk.to_dict(orient='records'):
-                            serialize_data = json.dumps(records).encode('utf-8')
-                            conn.send(serialize_data + b'/n')
-                            time.sleep(5)
-                            last_sent_index += 1
-                        records = []
+            for chunk in data_chunks:
+                serialize_data = json.dumps(chunk).encode('utf-8')
+                conn.send(serialize_data + b'\n')  # Send each chunk
+                time.sleep(5)  # Simulate real-time streaming
         except (BrokenPipeError, ConnectionResetError):
-            print("Client disconnected.")
+            logging.error("Client disconnected.")
         finally:
             conn.close()
-            print("Connection Closed")
+            logging.info("Connection closed")
 
 if __name__ == '__main__':
-    send_data_over_socket("src/datasets/yelp_dataset/yelp_academic_dataset_review.json")
-    
+    file_path = "src/datasets/yelp_dataset/yelp_academic_dataset_review.json"
+    data = read_data_from_file(file_path)
+    chunk_size = 2
+    data_chunks = chunk_data(data, chunk_size)
+    send_data_over_socket(data_chunks)
